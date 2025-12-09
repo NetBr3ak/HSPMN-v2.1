@@ -5,151 +5,102 @@
 ![PyTorch](https://img.shields.io/badge/pytorch-2.4%2B-orange)
 ![Status](https://img.shields.io/badge/status-research_preview-yellow)
 
-**HSPMN v2** (Hybrid Sparse-Pyramidal Mixture Network) is a novel Large Language Model architecture designed to solve the problem of **Computational Isotropy**. Inspired by the *Shallow Brain Hypothesis*, it dynamically allocates computational resources based on the information-theoretic complexity of input tokens.
+**HSPMN v2** is an experimental LLM architecture that challenges the way standard Transformers work. Instead of spending the exact same amount of compute on every single word, it tries to mimic biological efficiency.
 
-> *"The brain does not process every stimulus with the full weight of the neocortex. Why should our models?"*
-
----
-
-## 🧠 The Core Concept
-
-Contemporary LLMs treat the token "the" with the same computational weight as a complex logical predicate. This is inefficient.
-
-**HSPMN v2** introduces a **Target-Sparsity Regularized Router** that bifurcates computation into two streams:
-1.  **Reflexive Stream (Fast System 1):** A lightweight, dense stream (Conv1d + MLP) that processes *every* token to maintain grammatical continuity and local context.
-2.  **Contextual Stream (Slow System 2):** A heavy, sparse stream (Attention) that activates *only* for semantically dense tokens requiring global context integration.
-
-### Key Innovations
-*   **SQDK Attention (Sparse-Query, Dense-Key):** Solves the "Context Fracture" problem. Even if a token is not routed to the attention mechanism, it remains visible as a Key/Value to future tokens.
-*   **Target-Sparsity Regularization:** A differentiable load-balancing loss ensures the model adheres to a strict metabolic budget (e.g., only 20% of tokens use Attention).
-*   **Grouped Query Attention (GQA):** Reduces the memory footprint of the dense KV cache.
+> *"The brain doesn't use the full weight of the neocortex to process a simple 'hello'. Why should our models?"*
 
 ---
 
-## 🏗️ Architecture
+## 🧠 The Big Idea
 
-The data flow ensures that while computation is sparse, context remains dense.
+Current LLMs suffer from **Computational Isotropy**: the word "the" costs as much to process as a complex scientific concept. That's a waste of energy.
 
-```mermaid
-graph TD
-    subgraph Input Processing
-    I[Input Embeddings] --> R[Sparsity Router]
-    I --> RS[Reflexive Stream]
-    end
+**HSPMN v2** fixes this by splitting the workload into two paths, similar to Kahneman's "System 1" and "System 2" thinking:
 
-    subgraph Routing Logic
-    R -- "Logits" --> G[Gumbel-Softmax]
-    G -- "Top-K Mask" --> CS[Contextual Stream]
-    end
+1.  **Reflexive Stream (Fast Path):** A lightweight MLP + Conv1d layer. It handles simple syntax and grammar. It runs on *every* token to keep the sentence flowing smoothly.
+2.  **Contextual Stream (Slow Path):** A heavy Attention mechanism. It activates *only* for difficult or important tokens that need deep context.
 
-    subgraph Reflexive Stream "System 1 (Dense)"
-    RS --> C1[Conv1d (Local Mixing)]
-    C1 --> M1[MLP (Projection)]
-    end
+### Why is this cool?
+*   **No "Context Fracture":** In many sparse models, if you skip a token, it disappears. Here, we use **SQDK (Sparse-Query, Dense-Key)** attention. Even if a token takes the "Fast Path", it remains visible to future tokens. Nothing gets lost.
+*   **Smart Budgeting:** The model learns to be lazy. We force it to route only a small percentage (e.g., 20%) of tokens to the heavy Attention layer.
+*   **Hardware Ready:** Designed with next-gen GDDR7 memory in mind, using Grouped Query Attention (GQA) to keep memory usage low.
 
-    subgraph Contextual Stream "System 2 (Sparse)"
-    CS --> SQ[Sparse Queries]
-    SQ --> A[SQDK Attention]
-    A -- "Attend to Global KV" --> O_Attn[Attention Output]
-    end
+---
 
-    subgraph Fusion
-    M1 --> Add((+))
-    O_Attn --> Add
-    Add --> O[Layer Output]
-    end
+## 🏗️ How It Works (Simplified)
 
-    style R fill:#f9f,stroke:#333,stroke-width:2px
-    style RS fill:#dfd,stroke:#333,stroke-width:2px
-    style CS fill:#fdd,stroke:#333,stroke-width:2px
-    style A fill:#bbf,stroke:#333,stroke-width:2px
-```
+Instead of a complex diagram, think of the data flow like this:
+
+1.  **Input:** Token comes in.
+2.  **Router:** A tiny neural network asks: *"Is this token surprising?"*
+3.  **Decision:**
+    *   **No (Simple token):** Go to the **Reflexive Stream**. Apply simple mixing (Conv1d) so we don't lose track of position. **Cost: Low.**
+    *   **Yes (Complex token):** Go to the **Contextual Stream**. Perform full Attention. **Cost: High.**
+4.  **Output:** Merge the results.
+
+This ensures we save massive amounts of compute (FLOPs) without breaking the logical chain of the sentence.
 
 ---
 
 ## 🚀 Performance
 
-HSPMN v2 is designed for high-throughput inference on next-gen hardware (e.g., NVIDIA RTX 5090 with GDDR7).
+We tested this on an **NVIDIA RTX 5090**. Here is the reality of the current implementation:
 
-| Metric | Dense Baseline | HSPMN v2 | Improvement |
+| Metric | Dense Baseline | HSPMN v2 (Ours) | Impact |
 | :--- | :--- | :--- | :--- |
-| **Attention FLOPs** | 1.0x | **0.18x** | **5.4x Reduction** |
-| **Throughput** | ~182k tok/sec | **~115k tok/sec*** | *Memory Bound |
-| **VRAM Usage** | High | Moderate | via GQA |
+| **Computation (FLOPs)** | 100% | **~18%** | **5.4x less work** |
+| **Throughput** | ~182k tok/sec | ~115k tok/sec* | *Python Overhead |
 
-*\*Note: Current throughput is limited by Python-based routing overhead. Custom Triton kernels are in development to bridge the gap to theoretical FLOPs reduction.*
-
-```mermaid
-xychart-beta
-    title "Computational Cost (FLOPs) vs Throughput"
-    x-axis ["Dense Baseline", "HSPMN v2 (Current)", "HSPMN v2 (Projected)"]
-    y-axis "Relative Scale" 0 --> 6
-    bar [1.0, 0.18, 0.18]
-    line [1.0, 0.63, 3.5]
-```
-*(Bar = Attention Cost, Line = Throughput Speedup)*
+**Wait, why is it slower?**
+Currently, the theoretical speedup (5.4x) is masked by the overhead of Python code managing the routing logic. The math is solid, but the engine needs tuning. We are working on custom **OpenAI Triton kernels** to unlock the full speed potential.
 
 ---
 
-## 🛠️ Installation & Usage
+## 🛠️ Quick Start
 
 ### Prerequisites
-*   Python 3.10+
-*   PyTorch 2.4+ (with CUDA 12.x)
-*   Triton (for optimized kernels)
+You'll need Python 3.10+ and a GPU with CUDA support.
 
-### Setup
+### Installation
 ```bash
-# Clone the repository
+# Clone the repo
 git clone https://github.com/your-org/HSPMN-v2.git
 cd HSPMN-v2
 
-# Create environment
+# Set up environment
 python3 -m venv venv
 source venv/bin/activate
 
-# Install dependencies
+# Install requirements
 pip install -r requirements.txt
 ```
 
-### Running Benchmarks
-Validate the performance on your hardware:
+### Run a Benchmark
+
+Want to see the router in action?
+
 ```bash
 python benchmark_rtx5090.py --iter 100 --warmup 10
 ```
 
-### Training
-Start a training run with the sparsity-regularized objective:
-```bash
-python train.py --steps 1000 --batch 64 --seq_len 4096 --sparsity 0.2
-```
-
----
-
 ## 📄 Citation
 
-If you use HSPMN v2 in your research, please cite:
+If you find this useful for your research, please cite:
 
 ```bibtex
 @article{jedryczko2025hspmn,
   title={HSPMN v2: Adaptive Computation via Context-Aware Target-Sparsity Regularized Gating},
   author={Jędryczko, Szymon},
-  journal={arXiv preprint},
   year={2025}
 }
 ```
 
----
+## ⚠️ Known Limitations
 
-## ⚠️ Limitations & Future Work
-
-While HSPMN v2 offers significant efficiency gains, users should be aware of the following architectural constraints:
-
-1.  **Memory Bandwidth Bound:** Although SQDK reduces FLOPs by ~5.4x, the architecture requires loading the full Dense Key/Value cache. On high-bandwidth hardware (e.g., RTX 5090), performance is limited by VRAM bandwidth rather than compute. **Grouped Query Attention (GQA)** is critical to mitigate this.
-2.  **Routing Overhead:** The dynamic nature of token routing introduces kernel launch overheads. For small batch sizes, this overhead can mask the computational gains. We are developing fused **Triton kernels** to perform routing and attention in a single pass.
-3.  **Semantic Isolation:** Tokens routed to the *Reflexive Stream* do not participate in self-attention. While they receive residual updates via the MLP, they do not actively "attend" to other tokens, potentially missing context if consistently routed to the shallow path.
-4.  **Router Gradient Starvation:** Inactive tokens do not contribute to the main task loss gradients. We employ an auxiliary sparsity loss and Gumbel noise to prevent "dead neurons" in the router.
+*   **Memory Bound:** Even though we do fewer calculations, we still need to load all the Keys and Values from memory. On fast GPUs, memory speed is often the bottleneck, not calculation speed.
+*   **Router Training:** Teaching the router is tricky. If not careful, it might "collapse" and send everything to one path. We use special regularization to prevent this.
+*   **Semantic Isolation:** Tokens on the "Fast Path" don't get to look around (no self-attention). If a token stays shallow for too many layers, it might lose context.
 
 ---
 
-*Research Preview - Not for Production Use*
+*Research Preview - Code provided as-is for educational and research purposes.*
