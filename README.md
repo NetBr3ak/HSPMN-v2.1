@@ -119,6 +119,20 @@ python verify_models.py
 
 ---
 
+## 💡 Core Concept & Applications
+
+**HSPMN v2.1** addresses the quadratic bottleneck of traditional Transformers by decoupling **memory capacity** from **compute cost**. While standard models process every token with equal intensity, HSPMN uses a **Dual-System Architecture**:
+
+1.  **Reflexive Stream (System 1):** Handles syntax and local patterns for *all* tokens (Linear complexity).
+2.  **Contextual Stream (System 2):** Activates heavy attention *only* for semantically dense tokens (Sparse complexity).
+
+### Real-World Use Cases
+*   **Private Long-Document Analysis:** Process 500+ page legal/medical contracts locally on a single GPU without data leaving the premise.
+*   **Repository-Level Coding Agents:** Ingest entire codebases (200k+ tokens) into context for "whole-project" awareness with low typing latency.
+*   **Real-Time Log Filtering:** Efficiently scan terabytes of server logs, where the Router automatically learns to ignore repetitive noise and attend only to anomalies.
+
+---
+
 ## 📂 Project Structure
 
 ```
