@@ -68,7 +68,7 @@ def _sqdk_fwd_kernel(
     
     # Initialize accumulator
     acc = tl.zeros([BLOCK_M, HEAD_DIM], dtype=tl.float32)
-    l_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float('inf')
+    l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float('inf')
     
     # Loop over K, V blocks
@@ -102,13 +102,20 @@ def _sqdk_fwd_kernel(
         
         # Softmax and Update
         m_ij = tl.max(qk, 1)
-        p = tl.exp(qk - m_ij[:, None])
+        
+        # Fix for all-masked rows: replace -inf with 0 temporarily to avoid NaN in exp
+        m_ij_safe = tl.where(m_ij == float('-inf'), 0.0, m_ij)
+        p = tl.exp(qk - m_ij_safe[:, None])
         l_ij = tl.sum(p, 1)
         
         # Update m_i and l_i
         m_i_new = tl.maximum(m_i, m_ij)
-        alpha = tl.exp(m_i - m_i_new)
-        beta = tl.exp(m_ij - m_i_new)
+        
+        # Avoid NaN in alpha/beta when m_i_new is -inf
+        m_i_new_safe = tl.where(m_i_new == float('-inf'), 0.0, m_i_new)
+        
+        alpha = tl.exp(m_i - m_i_new_safe)
+        beta = tl.exp(m_ij - m_i_new_safe)
         
         l_i_new = alpha * l_i + beta * l_ij
         

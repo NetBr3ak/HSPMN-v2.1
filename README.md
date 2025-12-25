@@ -88,6 +88,16 @@ python train_v2_1.py \
     --wandb "hspmn-experiment-1"
 ```
 
+### 4. Testing & Verification
+Ensure kernel correctness and model integrity:
+```bash
+# Verify Triton kernels against PyTorch reference
+python test_kernels_v2_1.py
+
+# Verify saved checkpoints
+python verify_models.py
+```
+
 ---
 
 ## 🧠 Architecture Highlights
@@ -118,6 +128,8 @@ HSPMN-v2/
 ├── utils_v2_1.py           # Configuration and helper functions
 ├── train_v2_1.py           # Production-grade training script
 ├── benchmark_v2_1.py       # Unified benchmarking tool
+├── test_kernels_v2_1.py    # Unit tests for Triton kernels
+├── verify_models.py        # Checkpoint verification script
 ├── requirements.txt        # Minimal dependencies
 └── README.md               # Documentation
 ```
