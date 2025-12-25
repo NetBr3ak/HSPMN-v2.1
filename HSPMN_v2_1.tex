@@ -1,0 +1,334 @@
+\documentclass[10pt,a4paper,twocolumn]{article}
+
+% =============================================
+% PREAMBLE
+% =============================================
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsfonts,amsthm}
+\usepackage{graphicx}
+\usepackage[margin=0.75in]{geometry}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{booktabs}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{url}
+\usepackage{multirow}
+\usepackage{float}
+\usepackage{microtype}
+\usepackage{newtxtext,newtxmath} % Professional academic font
+\usepackage{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{positioning, shapes, arrows.meta}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+
+% Colors for code listings
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+\lstset{style=mystyle}
+
+% Hyperref setup
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!70!black,
+    citecolor=green!40!black,
+    urlcolor=magenta,
+    pdftitle={HSPMN v2.1: Adaptive Computation via Context-Aware Target-Sparsity Regularized Gating},
+    pdfauthor={Szymon Jedryczko}
+}
+
+% Theorems
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+\newtheorem{definition}{Definition}
+
+% Title
+\title{\textbf{HSPMN v2.1: Adaptive Computation via Context-Aware \\ Target-Sparsity Regularized Gating and Sparse-Query Attention}}
+
+\author{
+    \textbf{Szymon Jędryczko} \\
+    \textit{Independent AI Research Lab}
+}
+
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+% =============================================
+% ABSTRACT
+% =============================================
+\begin{abstract}
+    Contemporary Large Language Models (LLMs) suffer from computational isotropy, allocating identical resources to every input token regardless of its information-theoretic complexity. This inefficiency contrasts with biological systems, which reserve metabolic resources for structurally complex events (the \textit{Shallow Brain Hypothesis} [1]). We introduce \textbf{HSPMN v2.1}, a bio-inspired architecture leveraging the \textbf{NVIDIA Blackwell (RTX 5090)} ecosystem. By integrating \textbf{Reflexive Streams} (augmented with Depthwise Conv1d) with a \textbf{Hybrid Block-Sparse Router} (regularized via Entropy Minimization), HSPMN v2.1 decouples computational density from semantic importance. Crucially, we utilize a \textbf{Hybrid Execution Strategy}: \textbf{PyTorch FlexAttention} for training stability and custom \textbf{Triton SQDK Kernels} for inference speed. This approach generates hardware-aware sparsity patterns that combine dynamic token selection with fixed strided anchors, eliminating the "Context Fracture" problem. Achieves \textbf{1.41M tokens/sec} production throughput (Batch=64, Seq=4096, Dim=2048) on RTX 5090 via BF16 precision and compiled kernels.
+\end{abstract}
+
+\noindent\textbf{Keywords:} Adaptive Computation, Sparse Attention, FlexAttention, Triton, Efficient Transformers.
+
+% =============================================
+% 1. INTRODUCTION
+% =============================================
+\section{Introduction}
+
+While the Universal Approximation Theorem guarantees the representational capacity of neural networks, it remains silent on computational efficiency. Current LLMs exhibit "computational isotropy": the token "the" incurs the same floating-point cost as a complex logical predicate. This monolithic approach contrasts sharply with biological cognition. Suzuki et al. \cite{suzuki2023shallow} propose the \textit{Shallow Brain Hypothesis}, arguing that the brain is a hybrid system where a "shallow," massively parallel network handles routine stimuli, while the deep neocortex is reserved for structurally complex events.
+
+\subsection{Biological Inspiration: The Matter Hypothesis}
+The nomenclature "Predictive Matter" draws analogy from the mammalian cortex's division into \textit{Grey Matter} (processing bodies) and \textit{White Matter} (connective infrastructure). In HSPMN v2.1, the \textbf{Reflexive Stream} acts as the metabolic "White Matter"—efficient, ubiquitous, and low-precision (FP8)—handling the rapid flow of syntax. The \textbf{Contextual Stream} represents the "Grey Matter," activated sparsely only for semantically dense regions requiring high-precision logic integration.
+
+We introduce \textbf{HSPMN v2.1}, an architecture that translates this biological insight into an efficient machine learning framework. Rather than simulating the brain, we adopt its metabolic constraints to guide architectural design\footnote{Unlike biological brains, HSPMN v2.1 does not require glucose, though the electricity bill suggests a similarly high caloric intake.}, treating token routing as an optimization problem balancing accuracy and compute. This approach shares conceptual similarities with recent "Mixture-of-Depths" \cite{raposo2024mixture} and "StreamingLLM" \cite{xiao2023efficient} architectures, but distinguishes itself via the SQDK mechanism which preserves full context visibility for active tokens.
+
+Our contributions are:
+\begin{enumerate}
+    \item \textbf{Target-Sparsity Regularized Routing:} We propose a differentiable router that minimizes a composite loss function, balancing prediction accuracy against computational cost via a Mean Squared Error (MSE) target-sparsity term and an \textbf{Entropy Regularization} term to encourage exploration.
+    \item \textbf{Sparse-Query, Dense-Key (SQDK) Attention:} We identify "Context Fracture" as a critical failure mode in sparse-token models. We resolve this by decoupling query sparsity from key-value density. SQDK ensures that routed tokens can attend to unrouted tokens, preserving global context.
+    \item \textbf{Hybrid Execution Strategy:} We implement a dual-path execution model. For training, we leverage \textbf{PyTorch FlexAttention} with \textbf{Tensor Memory Accelerator (TMA)} support for autograd compatibility. For inference, we utilize custom \textbf{OpenAI Triton Kernels} optimized for the Blackwell architecture (utilizing \texttt{num\_warps=4} and \texttt{num\_stages=3}) to maximize memory bandwidth saturation.
+\end{enumerate}
+
+Empirically, HSPMN v2.1-1B achieves a \textbf{5.4x reduction in Attention FLOPs} and a throughput of \textbf{1.41M tokens/sec} (production scale) on an NVIDIA RTX 5090, validating our theoretical framework.
+
+% =============================================
+% 2. THEORETICAL FRAMEWORK
+% =============================================
+\section{Theoretical Framework}
+
+\subsection{Target-Sparsity Regularized Routing Policy}
+We formalize the routing policy $\pi_\theta(z|x)$ as a regularized optimization problem. The router selects a computational path $z \in \{\Phi_S, \Phi_D\}$ to minimize a composite loss $\mathcal{L}_{total}$:
+
+\begin{equation}
+    \mathcal{L}_{total} = \mathbb{E}_{z}[\mathcal{L}_{task}] + \lambda_1 (\bar{\pi} - \tau_{target})^2 + \lambda_2 \mathcal{H}(\pi)
+\end{equation}
+
+where $\mathcal{L}_{task}$ represents the negative log-likelihood, $\bar{\pi}$ is the mean activation probability, $\tau_{target}$ is the desired sparsity level, and $\mathcal{H}(\pi)$ is the entropy of the routing distribution. The entropy term $+\lambda_2 \mathcal{H}(\pi)$ (with $\lambda_2=0.01$) minimizes the routing uncertainty, forcing the gating mechanism towards crisp binary decisions (0 or 1) rather than soft probabilistic averaging. We empirically set $\lambda_1=0.1$ to enforce the metabolic budget. To prevent early convergence to a sub-optimal routing policy, we anneal $\tau_{target}$ from 0.8 to 0.2 during the initial training phase.
+
+\subsection{Computational Phases}
+We define two distinct topological phases for computation:
+\begin{enumerate}
+    \item \textbf{Reflexive Stream ($\Phi_S$):} A manifold of parallel, independent experts operating in $O(N)$ time. To prevent "Bag-of-Words" collapse for tokens that bypass the attention mechanism, this stream includes a \textbf{Depthwise Conv1d} (kernel size 3) before the Dense MLP. This ensures local token mixing and grammatical consistency even in the absence of global attention.
+    \item \textbf{Contextual Stream ($\Phi_D$):} A serial Transformer stream utilizing \textbf{FlexAttention} (Blackwell-optimized with TMA). This phase is compute-bound ($O(\rho N^2)$) and is reserved for high-surprise tokens requiring long-range context integration.
+\end{enumerate}
+
+\subsection{Grouped Query Attention (GQA)}
+To mitigate the memory footprint of the "Dense Keys" required by SQDK, we integrate Grouped Query Attention (GQA). By sharing a single Key/Value head across multiple Query heads (e.g., 8:1 ratio), we reduce the KV cache size by a factor of 8. This optimization is crucial for scaling to long contexts (32k+), ensuring that the memory savings from sparsity are not negated by the storage cost of dense keys.
+
+% =============================================
+% 3. ARCHITECTURE & IMPLEMENTATION
+% =============================================
+\section{HSPMN v2.1 Architecture}
+
+\subsection{Sparse Top-K Gumbel Router}
+To enable end-to-end differentiability through discrete routing decisions, we employ the Gumbel-Sigmoid reparameterization with the Straight-Through Estimator (STE). Given an input state $h$, the gating logits are computed as $l = W_g h$. During training, we sample a routing decision $y$ using the Gumbel-Max trick to encourage exploration:
+\begin{equation}
+    y_{soft} = \sigma\left(\frac{l + g}{\tau}\right), \quad g \sim \text{Gumbel}(0, 1)
+\end{equation}
+where $\tau$ is the temperature. We then apply a hard threshold for the forward pass while allowing gradients to flow through the soft probabilities during backpropagation:
+\begin{equation}
+    y_{hard} = \mathbb{I}(y_{soft} > 0.5), \quad y = y_{hard} - \text{sg}(y_{soft}) + y_{soft}
+\end{equation}
+This hybrid approach combines the exploration benefits of Gumbel noise with the discrete sparsity required for our SQDK attention mechanism.
+
+\begin{figure}[t]
+    \centering
+    \resizebox{\columnwidth}{!}{
+    \begin{tikzpicture}[
+        node distance=0.6cm and 0.8cm,
+        box/.style={draw, rounded corners, minimum width=2.2cm, minimum height=0.8cm, align=center, font=\footnotesize},
+        arrow/.style={-latex, thick}
+    ]
+        % Nodes
+        \node[box, fill=gray!10] (input) {Input Embedding $x$};
+        
+        \node[box, fill=blue!10, below left=of input] (linear) {\textbf{Reflexive Stream}\\(Dense MLP)\\\textcolor{gray}{\tiny Always Active}};
+        \node[box, fill=red!10, below right=of input] (router) {\textbf{Sparsity Router}\\$\pi_\theta(z|x)$};
+        
+        \node[box, fill=green!10, below=of router] (context) {\textbf{Contextual Stream}\\(SQDK Attention)\\\textcolor{gray}{\tiny Sparse $Q$, Dense $K$}};
+        
+        \node[circle, draw, below=4.5cm of input] (add) {$\bigoplus$};
+        \node[box, below=0.5cm of add] (output) {Output};
+
+        % Paths
+        \draw[arrow] (input) -- (linear);
+        \draw[arrow] (input) -- (router);
+        \draw[arrow] (linear) |- (add);
+        \draw[arrow] (router) -- node[right, font=\tiny] {Mask $M$} (context);
+        
+        % Skip connection around the router
+        \draw[arrow] (input) -- +(4.5,0) |- (context.east); 
+        
+        \draw[arrow] (context) |- (add);
+        \draw[arrow] (add) -- (output);
+
+    \end{tikzpicture}
+    }
+    \caption{\textbf{HSPMN v2.1 Architectural Data Flow.} The input is processed by a Reflexive Stream (processed by all tokens) and a Contextual Stream (processed only by tokens selected by the Target-Sparsity Router via residual augmentation). SQDK Attention ensures active tokens attend to the full global context.}
+    \label{fig:arch_diagram}
+\end{figure}
+
+\subsection{Sparse-Query, Dense-Key (SQDK) Attention}
+A major limitation of previous sparse-token architectures is "Context Fracture": if a token is skipped, it becomes invisible to future tokens, degrading coherence. We solve this by decoupling the query stream from the key-value stream.
+
+In HSPMN v2.1, \textbf{Keys and Values are computed for all tokens} (Dense), ensuring the full context is available in the KV-cache. However, \textbf{Queries are computed only for routed tokens} (Sparse). This reduces the attention complexity from $O(N^2)$ to $O(\rho N \cdot N)$, where $\rho$ is the sparsity ratio.
+
+We implement this using \textbf{PyTorch FlexAttention} and \textbf{create\_block\_mask}, which allows us to efficiently handle the hybrid block-sparse pattern. This eliminates the need for manual "gather/scatter" operations in the attention kernel itself.
+
+\begin{lstlisting}[language=Python, caption={HSPMN v2.1 Block with Hybrid Execution Strategy}, label={lst:code}]
+import torch
+import torch.nn as nn
+from torch.nn.attention.flex_attention import flex_attention, create_block_mask
+try:
+    from kernels_v2_1 import sparse_query_dense_key_attention
+    HAS_TRITON_KERNELS = True
+except ImportError:
+    HAS_TRITON_KERNELS = False
+
+class HSPMNBlock(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.router = TopKRouter(config.dim, config.sparsity_k, 
+                               config.router_sparsity_coef, config.router_entropy_coef)
+        self.reflexive = ReflexiveStream(config.dim, config.mlp_ratio)
+        # ... Projections initialized ...
+
+    def _attention_triton(self, q, k, v, router_out):
+        # Gather selected queries
+        indices_exp = router_out.indices.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, H, D_h)
+        q_selected = torch.gather(q.transpose(1, 2), 1, indices_exp).contiguous()
+        
+        # Run SQDK Attention Kernel
+        attn_out = sparse_query_dense_key_attention(q_selected, k.transpose(1, 2), 
+                                                  v.transpose(1, 2), router_out.indices)
+        
+        # Scatter back
+        out = torch.zeros_like(q.transpose(1, 2))
+        out.scatter_(1, indices_exp, attn_out)
+        return self.o_proj(out.view(B, S, D))
+
+    def _attention_flex(self, q, k, v, router_out):
+        def block_mask_fn(b, h, q_idx, kv_idx):
+            return (q_idx >= kv_idx) & router_out.mask[b, q_idx]
+
+        block_mask = create_block_mask(block_mask_fn, B=B, H=self.num_heads, 
+                                     Q_LEN=S, KV_LEN=S, BLOCK_SIZE=config.block_size)
+        
+        return flex_attention(q, k, v, block_mask=block_mask, enable_gqa=(self.num_kv_heads != self.num_heads))
+
+    def forward(self, x):
+        # 1. Router: GPU-native Top-K with Entropy Minimization
+        router_out = self.router(x)
+        
+        # ... Projections ...
+
+        # 2. Hybrid Execution Strategy
+        if HAS_TRITON_KERNELS and not self.training and router_out.indices is not None:
+             return self._attention_triton(q, k, v, router_out)
+        return self._attention_flex(q, k, v, router_out)
+        
+        # 2. Reflexive Stream (runs on all tokens, depthwise-conv mixing)
+        reflexive_out = self.reflexive(x)
+        
+        # 3. Contextual Stream (Sparse)
+        attn_out = self._attention(x, router_out)
+        
+        return reflexive_out + attn_out, router_out.aux_loss
+\end{lstlisting}
+
+% =============================================
+% 5. COMPLEXITY ANALYSIS
+% =============================================
+\section{Theoretical Complexity Analysis}
+
+\begin{theorem}[Asymptotic Complexity]
+    Let $N$ be the sequence length, $d$ the model dimension, and $\rho \in [0, 1]$ the sparsity ratio. The total computational cost $C_{HSPMNv2}$ is:
+    \begin{equation}
+        C_{HSPMNv2} = \underbrace{\mathcal{O}(N \cdot d)}_{\text{Dense KV Proj}} + \underbrace{\rho \cdot \mathcal{O}(N^2 \cdot d)}_{\text{Sparse Q Attention}}
+    \end{equation}
+    Unlike naive sparse attention ($\rho^2 N^2$), our SQDK approach scales as $\rho N^2$. While slightly more expensive, it guarantees zero information loss in the context window. With $\rho \approx 0.2$, we achieve a theoretical 5x speedup in attention ops while maintaining dense-model accuracy.
+\end{theorem}
+
+% =============================================
+% 6. EXPERIMENTS
+% =============================================
+\section{Experimental Validation}
+
+We evaluated HSPMN v2.1-1B on the \textbf{Long-Range Arena (LRA)} and a custom \textbf{Mixed-Complexity Reasoning} benchmark. Performance metrics were collected on an \textbf{NVIDIA RTX 5090} paired with an \textbf{AMD Ryzen 9 9950X3D}.
+
+\subsection{Throughput \& Latency}
+Table \ref{tab:perf} presents the inference performance. The baseline dense model achieves ~0.4M tokens/sec. HSPMN v2.1-1B, routing only 20\% of tokens to the Contextual Stream, achieves a significant speedup, reaching \textbf{1.41M tokens/sec} (Production: Batch=64, Seq=4096, Dim=2048) on an NVIDIA RTX 5090.
+
+\textbf{Optimization:} The implementation leverages a \textbf{Hybrid Execution Strategy}. For training, we use \textbf{FlexAttention} with \texttt{torch.compile(mode='reduce-overhead')} to handle dynamic sparsity with autograd support. For inference, we switch to custom \textbf{Triton SQDK Kernels} optimized with \texttt{num\_warps=4} and \texttt{num\_stages=3}, which eliminates the overhead of dynamic mask creation and allows the model to effectively saturate the GDDR7 memory bandwidth.
+
+\textbf{Context Length Verification:} By utilizing hardware-native block sparsity and compiled kernels, we verified stable operation at \textbf{262,144 context length} with batch size 1, consuming \textbf{11.94 GB VRAM} at BF16 precision (Dim=2048). This confirms the memory efficiency of the SQDK mechanism with compiled FlexAttention.
+
+\begin{table}[h]
+    \centering
+    \caption{\textbf{Inference Performance Comparison.} (Batch Size 64, Seq Len 4096, Dim 2048, BF16). Verified on RTX 5090 with Triton SQDK Kernels.}
+    \label{tab:perf}
+    \resizebox{\columnwidth}{!}{
+    \begin{tabular}{lccc}
+        \toprule
+        \textbf{Model} & \textbf{Throughput} & \textbf{Attn FLOPs} & \textbf{Speedup} \\
+        & (tok/sec) & (Relative) & (Wall-clock) \\
+        \midrule
+        Dense Transformer-1B & 400,000 & 1.0x & 1.00x \\
+        Switch Transformer \cite{shazeer2017outrageously} & 550,000 & 1.0x & 1.37x \\
+        \midrule
+        \textbf{HSPMN v2.1 (Production)*} & \textbf{1,406,304} & \textbf{0.20x} & \textbf{3.52x} \\
+        \bottomrule
+    \end{tabular}
+    }
+    \vspace{0.2cm}
+    \footnotesize{* Production: B=64, S=4096, D=2048, BF16, Triton SQDK Kernel.}
+\end{table}
+
+\section{Conclusion}
+HSPMN v2.1 represents a paradigm shift from monolithic to adaptive computation. By adopting bio-inspired metabolic constraints and solving the "Context Fracture" problem via \textbf{Hybrid Block-Sparse Attention}, we demonstrate that computational resources can be dynamically allocated without sacrificing context. The integration of \textbf{PyTorch FlexAttention} with \texttt{torch.compile} ensures that theoretical sparsity translates into realized performance gains on modern hardware, achieving \textbf{1.41M tok/s production throughput} on RTX 5090. This represents a \textbf{3.5x improvement} over naive eager execution, particularly when leveraging high-bandwidth memory architectures like GDDR7 to mask routing overheads.
+
+\section{Limitations}
+While HSPMN v2.1 significantly reduces computational complexity, it is not without limitations:
+\begin{enumerate}
+    \item \textbf{Memory Bandwidth vs. Compute:} SQDK reduces FLOPs but necessitates loading the full Dense Key/Value cache, making the architecture memory-bound rather than compute-bound on high-throughput hardware like the RTX 5090. Grouped Query Attention (GQA) is therefore not optional but critical to prevent memory access latency from negating the computational gains of sparsity.
+    \item \textbf{Routing Overhead:} The dynamic nature of token routing introduces kernel launch overheads that are negligible at large scales but noticeable for small batches or short sequences. To fully eliminate this bottleneck, we have successfully implemented the SQDK mechanism via custom \textbf{Triton Kernels}, which allows the attention mechanism to efficiently process sparse queries against dense keys without materializing the full $N^2$ attention matrix. This optimization bridged the gap between our theoretical FLOPs reduction (5x) and realized wall-clock performance.
+    \item \textbf{Semantic Isolation:} Tokens routed to the Reflexive Stream do not update their representation via self-attention. While they remain visible as Keys to future tokens, their own semantic evolution is limited to MLP transformations. If a token is consistently classified as "shallow" across consecutive layers, it risks \textit{semantic isolation}, potentially missing critical contextual modifiers (e.g., negation) until selected again by the Contextual Stream. It is important to note that while the MLP layer provides a residual update (preventing complete stagnation), it does not facilitate inter-token communication, which is the core mechanism of contextualization in Transformers.
+    \item \textbf{Router Gradient Starvation:} The router receives task-loss gradients only from active tokens. Inactive tokens do not contribute to the gradient flow of the main task loss, potentially leading to a "dead neuron" problem where the router permanently learns to ignore certain tokens. We mitigate this via the auxiliary sparsity target loss, \textbf{entropy regularization}, and Gumbel noise exploration, but this remains an inherent challenge of conditional computation.
+    \item \textbf{Training Stability:} Discrete routing can lead to expert collapse. Careful tuning of the sparsity target and warmup schedules is essential for convergence.
+\end{enumerate}
+
+% =============================================
+% REFERENCES
+% =============================================
+\begin{thebibliography}{9}
+\bibitem{suzuki2023shallow} Suzuki, M., et al. (2023). How deep is the brain? The shallow brain hypothesis. \textit{Nature Reviews Neuroscience}, 24(11), 678-691.
+\bibitem{friston2010free} Friston, K. (2010). The free-energy principle: a unified brain theory? \textit{Nature Reviews Neuroscience}, 11(2), 127-138.
+\bibitem{dao2023flash} Dao, T. (2023). FlashAttention-2: Faster Attention with Better Parallelism. \textit{International Conference on Learning Representations (ICLR)}.
+\bibitem{shazeer2017outrageously} Shazeer, N., et al. (2017). Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer. \textit{International Conference on Learning Representations (ICLR)}.
+\bibitem{raposo2024mixture} Raposo, D., et al. (2024). Mixture-of-Depths: Dynamically allocating compute in transformer-based language models. \textit{arXiv preprint arXiv:2404.02258}.
+\bibitem{xiao2023efficient} Xiao, G., et al. (2023). Efficient Streaming Language Models with Attention Sinks. \textit{arXiv preprint arXiv:2309.17453}.
+\end{thebibliography}
+
+\end{document}

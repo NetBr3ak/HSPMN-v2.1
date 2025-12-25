@@ -1,5 +1,6 @@
-torch>=2.4.0
-numpy
-tqdm
-packaging
-ninja
+numpy==2.3.5
+packaging==24.2
+torch==2.10.0.dev20251210+cu128
+tqdm==4.67.1
+triton==3.6.0+git8fedd49b
+wandb>=0.16.0
