@@ -93,7 +93,8 @@ class Trainer:
         logger.info(f"Model Params: {sum(p.numel() for p in self.model.parameters()) / 1e6:.1f}M")
         
         logger.info("Compiling model...")
-        self.model = torch.compile(self.model, mode="reduce-overhead", fullgraph=False)
+        # Use default mode to avoid CUDA Graph issues with gradient accumulation
+        self.model = torch.compile(self.model, mode="default", fullgraph=False)
         self.raw_model = self.model._orig_mod if hasattr(self.model, "_orig_mod") else self.model
 
     def _init_optimizer(self):

@@ -52,7 +52,7 @@ class TestHSPMNv2(unittest.TestCase):
                 # Create dummy indices for the first half
                 indices = torch.arange(S//2, device=x.device).unsqueeze(0).expand(B, -1)
                 
-                from model_hspmn_v2 import RouterOutput
+                from hspmn_v2_1 import RouterOutput
                 # mask, indices, logits, aux_loss
                 return RouterOutput(mask, indices, torch.zeros(B, S, device=x.device), self.aux_loss)
 
