@@ -126,5 +126,3 @@ HSPMN-v2/
 
 **Author**: Szymon Jędryczko
 **License**: MIT
-
-```
