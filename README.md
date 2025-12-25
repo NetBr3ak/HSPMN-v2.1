@@ -124,7 +124,7 @@ HSPMN-v2/
 
 ---
 
-**Author**: Szymon Jędryczko (Lead Researcher)  
+**Author**: Szymon Jędryczko
 **License**: MIT
 
 ```
